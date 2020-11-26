@@ -1,5 +1,4 @@
-import math
+def funkcja(par1, par2='a'):
+    print(par1, par2)
 
-is_it_tuple = (9,)
-print(type(is_it_tuple))
-print(is_it_tuple)
+funkcja('a', 7)
