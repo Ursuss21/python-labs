@@ -1,84 +1,133 @@
 import pandas as pd
 import os
 
-sheet_name = "Sheet1"
-
 
 class EmptySheetName(Exception):
     def __init__(self, msg):
         super().__init__(msg)
 
 
-def prepare_data(filename):
-    dataframe = pd.read_csv("resources/csv/" + filename)
-    dataframe.columns = ["x", "y", "z"]
-    dataframe = dataframe.sort_values(by=["z"])
-    return dataframe
+class GraphGenerator:
+    XLSX_PATH = "resources/xlsx/"
+    CSV_PATH = "resources/csv/"
+    SUFFIX = ".csv"
 
+    def __init__(self, file, sheet_name="Sheet1", chart_destination_cell="D1"):
+        self.sheet_name = sheet_name
+        self.file = file
 
-def get_series_values(dataframe):
-    return dataframe.groupby("z").last().index
+        self.dataframe = None
+        self.writer = None
 
+        self.workbook = None
+        self.worksheet = None
+        self.chart = None
+        self.series_values = None
 
-def create_excel_writer(filename):
-    try:
-        return pd.ExcelWriter("resources/xlsx/" + filename[:-4] + ".xlsx", engine="xlsxwriter")
-    except PermissionError as e:
-        print("Destination file opened. Close destination file and try again.")
-        raise
+        self.first_index = 0
+        self.last_index = 0
+        self.chart_destination_cell = chart_destination_cell
 
+    def read_data_from_csv(self):
+        self.dataframe = pd.read_csv(self.CSV_PATH + self.file)
 
-def export_data_to_excel(dataframe, writer):
-    dataframe.to_excel(writer, index=False, header=False, sheet_name=sheet_name)
+    def set_dataframe_column_names(self):
+        self.dataframe.columns = ["x", "y", "label"]
 
+    def sort_dataframe_column(self, column_name):
+        self.dataframe = self.dataframe.sort_values(by=[column_name])
 
-def get_chart_series_length(dataframe, x):
-    return len(dataframe[dataframe["z"] == x].index.to_list())
+    def prepare_data(self):
+        self.read_data_from_csv()
+        self.set_dataframe_column_names()
+        self.sort_dataframe_column("label")
 
+    def create_excel_writer(self):
+        try:
+            self.writer = pd.ExcelWriter(self.XLSX_PATH + self.file[:-4] + ".xlsx",
+                                         engine="xlsxwriter")
+        except PermissionError:
+            print("Destination file opened. Close destination file and try again.")
+            raise
 
-def generate_chart(dataframe, workbook):
-    series_values = get_series_values(dataframe)
-    first_index = 0
-    chart = workbook.add_chart({"type": "scatter", "subtype": "straight_with_markers"})
-    for x in series_values:
-        last_index = get_chart_series_length(dataframe, x) + first_index
-        chart.add_series({
-            "categories": [sheet_name, first_index, 0, last_index, 0],
-            "values": [sheet_name, first_index, 1, last_index, 1],
+    def export_data_to_excel(self):
+        self.dataframe.to_excel(self.writer,
+                                index=False,
+                                header=False,
+                                sheet_name=self.sheet_name)
+
+    def create_workbook(self):
+        self.workbook = self.writer.book
+
+    def create_worksheet(self):
+        self.worksheet = self.writer.sheets[self.sheet_name]
+
+    def prepare_sheet(self):
+        self.create_workbook()
+        self.create_worksheet()
+
+    def get_series_values(self):
+        self.series_values = self.dataframe.groupby("label").last().index
+
+    def create_chart(self):
+        self.chart = self.workbook.add_chart({"type": "scatter",
+                                              "subtype": "straight_with_markers"})
+
+    def set_first_index(self):
+        self.first_index = self.last_index
+
+    def set_last_index(self, series_value):
+        self.last_index = len(self.dataframe[self.dataframe["label"] == series_value].index.to_list()) \
+                          + self.first_index
+
+    def add_series(self):
+        self.chart.add_series({
+            "categories": [self.sheet_name, self.first_index, 0, self.last_index, 0],
+            "values": [self.sheet_name, self.first_index, 1, self.last_index, 1],
             "line": {"none": True},
             "marker": {"type": "circle", "size": 4}
         })
-        chart.set_y_axis({"major_gridlines": {"visible": False}})
-        chart.set_legend({"position": "none"})
-        first_index = last_index
-    return chart
 
+    def create_series(self):
+        for series_value in self.series_values:
+            self.set_last_index(series_value)
+            self.add_series()
+            self.set_first_index()
 
-def prepare_sheet(dataframe, writer):
-    workbook = writer.book
-    worksheet = writer.sheets[sheet_name]
-    chart = generate_chart(dataframe, workbook)
-    worksheet.insert_chart("D1", chart)
+    def set_chart_gridlines_visibility(self, value):
+        self.chart.set_y_axis({"major_gridlines": {"visible": value}})
 
+    def disable_chart_legend(self):
+        self.chart.set_legend({"position": "none"})
 
-def generate_xlsx():
-    for filename in os.listdir("resources/csv"):
-        if filename.endswith(".csv"):
-            dataframe = prepare_data(filename)
-            writer = create_excel_writer(filename)
-            try:
-                if sheet_name == "":
-                    raise EmptySheetName("Sheet name cannot be empty")
-                export_data_to_excel(dataframe, writer)
-                prepare_sheet(dataframe, writer)
-                print(filename)
-                writer.save()
-            except EmptySheetName as e:
-                print(e)
+    def insert_chart_into_sheet(self):
+        self.worksheet.insert_chart(self.chart_destination_cell, self.chart)
+
+    def generate_chart(self):
+        self.get_series_values()
+        self.create_chart()
+        self.create_series()
+        self.set_chart_gridlines_visibility(False)
+        self.disable_chart_legend()
+        self.insert_chart_into_sheet()
+
+    def save_chart(self):
+        self.writer.save()
+
+    def prepare_excel_sheet_with_chart(self):
+        self.create_excel_writer()
+        self.prepare_data()
+        self.export_data_to_excel()
+        self.prepare_sheet()
+        self.generate_chart()
+        self.save_chart()
 
 
 def main():
-    generate_xlsx()
+    for filename in os.listdir(GraphGenerator.CSV_PATH):
+        if filename.endswith(GraphGenerator.SUFFIX):
+            g = GraphGenerator(filename)
+            g.prepare_excel_sheet_with_chart()
 
 
 if __name__ == "__main__":
